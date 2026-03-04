@@ -2,5 +2,6 @@
 elasticsearch_exporter
 *.tar.gz
 *-stamp
-.idea
-*~
+.tarballs
+/vendor
+vendor/

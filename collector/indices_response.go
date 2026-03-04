@@ -1,3 +1,16 @@
+// Copyright The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package collector
 
 // indexStatsResponse is a representation of a Elasticsearch Index Stats
@@ -5,6 +18,15 @@ type indexStatsResponse struct {
 	Shards  IndexStatsShardsResponse           `json:"_shards"`
 	All     IndexStatsIndexResponse            `json:"_all"`
 	Indices map[string]IndexStatsIndexResponse `json:"indices"`
+	Aliases map[string][]string
+}
+
+// aliasesResponse is a representation of a Elasticsearch Alias Query
+type aliasesResponse map[string]aliasMapping
+
+// aliasMapping is a mapping of index names to a map of associated alias names where the alias names are keys
+type aliasMapping struct {
+	Aliases map[string]map[string]interface{} `json:"aliases"`
 }
 
 // IndexStatsShardsResponse defines index stats shards information structure
@@ -67,16 +89,17 @@ type IndexStatsIndexStoreResponse struct {
 
 // IndexStatsIndexIndexingResponse defines index stats index indexing information structure
 type IndexStatsIndexIndexingResponse struct {
-	IndexTotal           int64 `json:"index_total"`
-	IndexTimeInMillis    int64 `json:"index_time_in_millis"`
-	IndexCurrent         int64 `json:"index_current"`
-	IndexFailed          int64 `json:"index_failed"`
-	DeleteTotal          int64 `json:"delete_total"`
-	DeleteTimeInMillis   int64 `json:"delete_time_in_millis"`
-	DeleteCurrent        int64 `json:"delete_current"`
-	NoopUpdateTotal      int64 `json:"noop_update_total"`
-	IsThrottled          bool  `json:"is_throttled"`
-	ThrottleTimeInMillis int64 `json:"throttle_time_in_millis"`
+	IndexTotal           int64    `json:"index_total"`
+	IndexTimeInMillis    int64    `json:"index_time_in_millis"`
+	IndexCurrent         int64    `json:"index_current"`
+	IndexFailed          *int64   `json:"index_failed,omitempty"`
+	DeleteTotal          int64    `json:"delete_total"`
+	DeleteTimeInMillis   int64    `json:"delete_time_in_millis"`
+	DeleteCurrent        int64    `json:"delete_current"`
+	NoopUpdateTotal      int64    `json:"noop_update_total"`
+	IsThrottled          bool     `json:"is_throttled"`
+	ThrottleTimeInMillis int64    `json:"throttle_time_in_millis"`
+	WriteLoad            *float64 `json:"write_load,omitempty"`
 }
 
 // IndexStatsIndexGetResponse defines index stats index get information structure
@@ -123,9 +146,11 @@ type IndexStatsIndexMergesResponse struct {
 
 // IndexStatsIndexRefreshResponse defines index stats index refresh information structure
 type IndexStatsIndexRefreshResponse struct {
-	Total             int64 `json:"total"`
-	TotalTimeInMillis int64 `json:"total_time_in_millis"`
-	Listeners         int64 `json:"listeners"`
+	Total                     int64 `json:"total"`
+	TotalTimeInMillis         int64 `json:"total_time_in_millis"`
+	ExternalTotal             int64 `json:"external_total"`
+	ExternalTotalTimeInMillis int64 `json:"external_total_time_in_millis"`
+	Listeners                 int64 `json:"listeners"`
 }
 
 // IndexStatsIndexFlushResponse defines index stats index flush information structure

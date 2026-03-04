@@ -1,3 +1,16 @@
+// Copyright The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package clusterinfo
 
 import (
@@ -5,13 +18,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -35,11 +48,11 @@ type consumer interface {
 	String() string
 }
 
-// Retriever periodically gets the cluster info from the / endpoint end
+// Retriever periodically gets the cluster info from the / endpoint and
 // sends it to all registered consumer channels
 type Retriever struct {
 	consumerChannels      map[string]*chan *Response
-	logger                log.Logger
+	logger                *slog.Logger
 	client                *http.Client
 	url                   *url.URL
 	interval              time.Duration
@@ -51,7 +64,7 @@ type Retriever struct {
 }
 
 // New creates a new Retriever
-func New(logger log.Logger, client *http.Client, u *url.URL, interval time.Duration) *Retriever {
+func New(logger *slog.Logger, client *http.Client, u *url.URL, interval time.Duration) *Retriever {
 	return &Retriever{
 		consumerChannels: make(map[string]*chan *Response),
 		logger:           logger,
@@ -114,14 +127,17 @@ func (r *Retriever) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (r *Retriever) updateMetrics(res *Response) {
-	_ = level.Debug(r.logger).Log("msg", "updating cluster info metrics")
+	u := *r.url
+	u.User = nil
+	url := u.String()
+	r.logger.Debug("updating cluster info metrics")
 	// scrape failed, response is nil
 	if res == nil {
-		r.up.WithLabelValues(r.url.String()).Set(0.0)
-		r.lastUpstreamErrorTs.WithLabelValues(r.url.String()).Set(float64(time.Now().Unix()))
+		r.up.WithLabelValues(url).Set(0.0)
+		r.lastUpstreamErrorTs.WithLabelValues(url).Set(float64(time.Now().Unix()))
 		return
 	}
-	r.up.WithLabelValues(r.url.String()).Set(1.0)
+	r.up.WithLabelValues(url).Set(1.0)
 	r.versionMetric.WithLabelValues(
 		res.ClusterName,
 		res.ClusterUUID,
@@ -129,8 +145,8 @@ func (r *Retriever) updateMetrics(res *Response) {
 		res.Version.BuildHash,
 		res.Version.Number.String(),
 		res.Version.LuceneVersion.String(),
-	)
-	r.lastUpstreamSuccessTs.WithLabelValues(r.url.String()).Set(float64(time.Now().Unix()))
+	).Set(1.0)
+	r.lastUpstreamSuccessTs.WithLabelValues(url).Set(float64(time.Now().Unix()))
 }
 
 // Update triggers an external cluster info label update
@@ -157,19 +173,17 @@ func (r *Retriever) Run(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				_ = level.Info(r.logger).Log(
-					"msg", "context cancelled, exiting cluster info update loop",
+				r.logger.Info(
+					"context cancelled, exiting cluster info update loop",
 					"err", ctx.Err(),
 				)
 				return
 			case <-r.sync:
-				_ = level.Info(r.logger).Log(
-					"msg", "providing consumers with updated cluster info label",
-				)
+				r.logger.Info("providing consumers with updated cluster info label")
 				res, err := r.fetchAndDecodeClusterInfo()
 				if err != nil {
-					_ = level.Error(r.logger).Log(
-						"msg", "failed to retrieve cluster info from ES",
+					r.logger.Error(
+						"failed to retrieve cluster info from ES",
 						"err", err,
 					)
 					r.updateMetrics(nil)
@@ -177,8 +191,8 @@ func (r *Retriever) Run(ctx context.Context) error {
 				}
 				r.updateMetrics(res)
 				for name, consumerCh := range r.consumerChannels {
-					_ = level.Debug(r.logger).Log(
-						"msg", "sending update",
+					r.logger.Debug(
+						"sending update",
 						"consumer", name,
 						"res", fmt.Sprintf("%+v", res),
 					)
@@ -194,32 +208,27 @@ func (r *Retriever) Run(ctx context.Context) error {
 		}
 	}(ctx)
 	// trigger initial cluster info call
-	_ = level.Info(r.logger).Log(
-		"msg", "triggering initial cluster info call",
-	)
+	r.logger.Info("triggering initial cluster info call")
 	r.sync <- struct{}{}
 
 	// start a ticker routine
 	go func(ctx context.Context) {
 		if r.interval <= 0 {
-			_ = level.Info(r.logger).Log(
-				"msg", "no periodic cluster info label update requested",
-			)
+			r.logger.Info("no periodic cluster info label update requested")
 			return
 		}
 		ticker := time.NewTicker(r.interval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
-				_ = level.Info(r.logger).Log(
-					"msg", "context cancelled, exiting cluster info trigger loop",
+				r.logger.Info(
+					"context cancelled, exiting cluster info trigger loop",
 					"err", ctx.Err(),
 				)
 				return
 			case <-ticker.C:
-				_ = level.Debug(r.logger).Log(
-					"msg", "triggering periodic update",
-				)
+				r.logger.Debug("triggering periodic update")
 				r.sync <- struct{}{}
 			}
 		}
@@ -229,7 +238,7 @@ func (r *Retriever) Run(ctx context.Context) error {
 	select {
 	case <-startupComplete:
 		// first sync has been successful
-		_ = level.Debug(r.logger).Log("msg", "initial clusterinfo sync succeeded")
+		r.logger.Debug("initial clusterinfo sync succeeded")
 		return nil
 	case <-time.After(initialTimeout):
 		// initial call timed out
@@ -247,8 +256,8 @@ func (r *Retriever) fetchAndDecodeClusterInfo() (*Response, error) {
 
 	res, err := r.client.Get(u.String())
 	if err != nil {
-		_ = level.Error(r.logger).Log(
-			"msg", "failed to get cluster info",
+		r.logger.Error(
+			"failed to get cluster info",
 			"err", err,
 		)
 		return nil, err
@@ -257,8 +266,8 @@ func (r *Retriever) fetchAndDecodeClusterInfo() (*Response, error) {
 	defer func() {
 		err = res.Body.Close()
 		if err != nil {
-			_ = level.Warn(r.logger).Log(
-				"msg", "failed to close http.Client",
+			r.logger.Warn(
+				"failed to close http.Client",
 				"err", err,
 			)
 		}
@@ -268,7 +277,12 @@ func (r *Retriever) fetchAndDecodeClusterInfo() (*Response, error) {
 		return nil, fmt.Errorf("HTTP Request failed with code %d", res.StatusCode)
 	}
 
-	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+	bts, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(bts, &response); err != nil {
 		return nil, err
 	}
 

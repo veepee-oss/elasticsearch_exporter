@@ -1,3 +1,16 @@
+// Copyright The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package clusterinfo
 
 import (
@@ -8,12 +21,12 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/go-kit/kit/log"
-
-	"github.com/blang/semver"
+	"github.com/blang/semver/v4"
+	"github.com/prometheus/common/promslog"
 )
 
 const (
@@ -30,8 +43,7 @@ const (
 
 type mockES struct{}
 
-func (mockES) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
+func (mockES) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, `{
   "name" : "%s",
   "cluster_name" : "%s",
@@ -59,8 +71,11 @@ func (mockES) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type mockConsumer struct {
 	name string
+
+	mu   sync.RWMutex
 	data *Response
-	ch   chan *Response
+
+	ch chan *Response
 }
 
 func newMockConsumer(ctx context.Context, name string, t *testing.T) *mockConsumer {
@@ -72,15 +87,22 @@ func newMockConsumer(ctx context.Context, name string, t *testing.T) *mockConsum
 		for {
 			select {
 			case d := <-mc.ch:
+				mc.mu.Lock()
 				mc.data = d
 				t.Logf("consumer %s received data from channel: %+v\n", mc, mc.data)
+				mc.mu.Unlock()
 			case <-ctx.Done():
-				t.Logf("shutting down consumer %s", mc)
 				return
 			}
 		}
 	}()
 	return mc
+}
+
+func (mc *mockConsumer) getData() Response {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+	return *mc.data
 }
 
 func (mc *mockConsumer) String() string {
@@ -96,7 +118,7 @@ func TestNew(t *testing.T) {
 	if err != nil {
 		t.Skipf("internal test error: %s", err)
 	}
-	r := New(log.NewNopLogger(), http.DefaultClient, u, 0)
+	r := New(promslog.NewNopLogger(), http.DefaultClient, u, 0)
 	if r.url != u {
 		t.Errorf("new Retriever mal-constructed")
 	}
@@ -108,7 +130,7 @@ func TestRetriever_RegisterConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("internal test error: %s", err)
 	}
-	retriever := New(log.NewNopLogger(), mockES.Client(), u, 0)
+	retriever := New(promslog.NewNopLogger(), mockES.Client(), u, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	consumerNames := []string{"consumer-1", "consumer-2"}
@@ -128,7 +150,7 @@ func TestRetriever_fetchAndDecodeClusterInfo(t *testing.T) {
 	versionNumber, _ := semver.Make(versionNumber)
 	luceneVersion, _ := semver.Make(luceneVersion)
 
-	var expected = &Response{
+	expected := &Response{
 		Name:        nodeName,
 		ClusterName: clusterName,
 		ClusterUUID: clusterUUID,
@@ -147,7 +169,7 @@ func TestRetriever_fetchAndDecodeClusterInfo(t *testing.T) {
 	if err != nil {
 		t.Skipf("internal test error: %s", err)
 	}
-	retriever := New(log.NewNopLogger(), mockES.Client(), u, 0)
+	retriever := New(promslog.NewNopLogger(), mockES.Client(), u, 0)
 	ci, err := retriever.fetchAndDecodeClusterInfo()
 	if err != nil {
 		t.Fatalf("failed to retrieve cluster info: %s", err)
@@ -167,7 +189,7 @@ func TestRetriever_Run(t *testing.T) {
 	}
 
 	// setup cluster info retriever
-	retriever := New(log.NewLogfmtLogger(os.Stdout), mockES.Client(), u, 0)
+	retriever := New(promslog.New(&promslog.Config{Writer: os.Stdout}), mockES.Client(), u, 0)
 
 	// setup mock consumer
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -184,7 +206,7 @@ func TestRetriever_Run(t *testing.T) {
 	retriever.Update()
 	time.Sleep(20 * time.Millisecond)
 	// ToDo: check mockConsumers received data
-	t.Logf("%+v\n", mc.data)
+	t.Logf("%+v\n", mc.getData())
 
 	// check for deadlocks
 	select {
