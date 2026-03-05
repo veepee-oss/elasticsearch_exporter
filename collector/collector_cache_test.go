@@ -15,7 +15,6 @@ package collector
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -33,7 +32,7 @@ func (n noOpCollector) Update(context.Context, chan<- prometheus.Metric) error {
 }
 
 func TestNewElasticsearchCollector_UsesSharedCacheByDefault(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	u, err := url.Parse("http://example:9200")
 	if err != nil {
 		t.Fatalf("failed to parse url: %v", err)
@@ -80,7 +79,7 @@ func TestNewElasticsearchCollector_UsesSharedCacheByDefault(t *testing.T) {
 }
 
 func TestNewElasticsearchCollector_SkipsCacheWhenRequested(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	u, err := url.Parse("http://example:9200")
 	if err != nil {
 		t.Fatalf("failed to parse url: %v", err)
