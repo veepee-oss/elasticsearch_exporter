@@ -1,0 +1,44 @@
+name: Create fix tag (v-prefix)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: "Existing tag to re-create with 'v' prefix (e.g. 1.10.1 → v1.10.1)"
+        required: false
+        default: "1.10.1"
+
+permissions:
+  contents: write
+
+jobs:
+  create-fix-tag:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve source tag and compute fix tag
+        id: resolve
+        run: |
+          SOURCE="${{ github.event.inputs.source_tag }}"
+          # Strip leading 'v' if present, then re-add it for the fix tag
+          BARE="${SOURCE#v}"
+          FIX_TAG="v${BARE}"
+          COMMIT_SHA=$(git rev-list -n1 "${SOURCE}")
+          echo "source_tag=${SOURCE}" >> "$GITHUB_OUTPUT"
+          echo "fix_tag=${FIX_TAG}"   >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Previous tag : ${SOURCE} (${COMMIT_SHA})"
+          echo "New fix tag  : ${FIX_TAG}"
+
+      - name: Create and push fix tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.resolve.outputs.fix_tag }}" "${{ steps.resolve.outputs.commit_sha }}"
+          git push origin "${{ steps.resolve.outputs.fix_tag }}"
+          echo "✅ Pushed tag ${{ steps.resolve.outputs.fix_tag }} → ${{ steps.resolve.outputs.commit_sha }}"
