@@ -9,6 +9,7 @@ permissions:
   contents: read
 
 env:
+  DOCKERHUB_NAMESPACE: ${{ github.repository_owner }}
   IMAGE_NAME: elasticsearch_exporter
 
 jobs:
@@ -45,7 +46,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=tag
             type=sha
