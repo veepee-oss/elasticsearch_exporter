@@ -19,6 +19,6 @@ tarball:
         - LICENSE
         - README.md
         - CHANGELOG.md
-        - examples/grafana/dashboard.json
+        - elasticsearch-mixin/compiled/dashboards/cluster.json
         - examples/kubernetes/deployment.yml
         - examples/prometheus/elasticsearch.rules
